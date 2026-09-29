@@ -91,6 +91,20 @@ button { font: inherit; }
 .sheet .aufgabe { display: flex; flex-direction: column; min-width: 0; }
 .sheet .thema-kurz { color: var(--muted); font-size: 13px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sheet li button[aria-current="true"] .thema-kurz { color: var(--fg); }
+.umfang-wahl { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.umfang-wahl .choice {
+  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+  border: 2px solid var(--line); border-radius: 4px; padding: 12px 14px; background: var(--bg);
+}
+.umfang-wahl .choice:hover { background: var(--panel); }
+.umfang-wahl .choice:has(input:checked) { border-color: var(--link); background: var(--panel); }
+.umfang-wahl .choice input { margin-top: 4px; accent-color: var(--link); flex: none; }
+.umfang-wahl .choice > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.umfang-wahl .choice strong { font-size: 17px; }
+.themen-box { border: 1px solid var(--line); border-left: 4px solid var(--link); padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.themen-aktionen { display: flex; gap: 10px; flex-wrap: wrap; }
+.start-leiste { display: flex; gap: 12px; flex-wrap: wrap; }
+.review .pool-q { scroll-margin-top: 12px; }
 .themen-wahl { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; }
 .themen-wahl label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; padding: 4px 2px; }
 .themen-wahl input { margin-top: 4px; accent-color: var(--link); }
@@ -7000,7 +7014,7 @@ LZK_FRAGEN.push(
   THEMEN.forEach(function (t) { themaById[t.id] = t; });
   var TEST_SIZE = THEMEN.reduce(function (s, t) { return s + t.anzahl; }, 0);
 
-  var DEFAULT_SETTINGS = { modus: "pruefung", bewertung: "streng", zeit: 0, grenze: 50 };
+  var DEFAULT_SETTINGS = { umfang: "lzk", modus: "uebung", bewertung: "streng", zeit: 0, grenze: 50 };
 
   /* Hinweis zu den Inhalten (KI-Unterstützung, Haftungsausschluss) – Startseite, Fußzeile, Kurzform bei jeder Lösung */
   var POOL_STAND = "29.09.2026";
@@ -7098,6 +7112,14 @@ LZK_FRAGEN.push(
   function goto(i) {
     if (!state.test) return;
     state.current = Math.max(0, Math.min(state.test.length - 1, i));
+    if (state.result) {
+      /* Nach der Abgabe: zur Auswertung dieser Aufgabe in den Ergebnissen springen */
+      state.view = "result";
+      save(); render();
+      var item = document.getElementById("auswertung-" + state.current);
+      if (item) item.scrollIntoView({ block: "start" });
+      return;
+    }
     state.view = "test";
     save(); render();
     var main = document.getElementById("main");
@@ -7141,7 +7163,7 @@ LZK_FRAGEN.push(
       var showMarks = !!state.result || state.settings.modus === "uebung";
       h += '<section class="sheet" aria-label="Aufgabenblatt"><h2>Aufgabenblatt</h2><ol>';
       state.test.forEach(function (q, i) {
-        var cur = (state.view === "test" && i === state.current) ? ' aria-current="true"' : "";
+        var cur = ((state.view === "test" || state.view === "result") && i === state.current) ? ' aria-current="true"' : "";
         var mark = "";
         if (state.result) {
           var d = state.result.details[i];
@@ -7180,21 +7202,34 @@ LZK_FRAGEN.push(
 
   function renderStart() {
     var s = state.settings;
-    var poolCount = {};
-    FRAGEN.forEach(function (f) { poolCount[f.thema] = (poolCount[f.thema] || 0) + 1; });
+    var poolCount = poolCounts();
+    var themen = s.umfang === "themen";
     var h = renderCrumbs("Lernzielkontrolle Zugführer Teil 1", false);
     h += '<section class="panel"><h1>Lernzielkontrolle Zugführer Teil 1</h1>' +
-      '<p class="lead">Übungstest zur Selbstkontrolle. Jeder Test stellt ' + TEST_SIZE + ' Multiple-Choice-Fragen zufällig aus einem Pool von ' +
-      FRAGEN.length + ' Fragen zusammen. Bei jeder Frage können eine oder mehrere Antworten richtig sein.</p>' +
-      '<div class="notice" role="note"><strong>Hinweis zu den Inhalten:</strong> ' + esc(HINWEIS) + "</div>";
+      '<p class="lead">Übungstest zur Selbstkontrolle mit ' + FRAGEN.length + ' Multiple-Choice-Fragen aus ' + THEMEN.length +
+      ' Themengebieten. Bei jeder Frage können eine oder mehrere Antworten richtig sein.</p>';
     if (testRunning()) {
       h += '<div class="notice">Eine begonnene ' + artLabel() + " ist noch offen (" + countSaved() + " von " + state.test.length +
         ' Aufgaben gespeichert). <button class="btn" data-act="nav" data-view="test">Test fortsetzen</button></div>';
     }
-    h += '<form id="settings" class="settings">' +
+    h += '<h2>Was möchtest du tun?</h2><form id="umfang" class="umfang-wahl">' +
+      choice("lzk", s.umfang, "Lernzielkontrolle", TEST_SIZE + " zufällige Fragen aus allen Themengebieten") +
+      choice("themen", s.umfang, "Einzelne Themen üben", "alle Fragen der ausgewählten Themengebiete") + "</form>";
+    if (themen) {
+      h += '<div class="themen-box"><form id="ueben" class="themen-wahl">';
+      THEMEN.forEach(function (t) {
+        var id = "ueben-" + t.id;
+        h += '<label for="' + id + '"><input type="checkbox" id="' + id + '" name="ueben" value="' + t.id + '"' +
+          (state.uebenThemen.indexOf(t.id) >= 0 ? " checked" : "") + "> <span>" + esc(t.name) +
+          ' <span class="muted tabular">(' + (poolCount[t.id] || 0) + ")</span></span></label>";
+      });
+      h += '</form><div class="themen-aktionen"><button class="btn" data-act="ueben-alle">Alle auswählen</button>' +
+        '<button class="btn" data-act="ueben-keine">Auswahl aufheben</button></div></div>';
+    }
+    h += '<h2>Einstellungen</h2><form id="settings" class="settings">' +
       '<fieldset><legend>Modus</legend>' +
-      radio("modus", "pruefung", s.modus, "Prüfung – Auswertung erst nach Abgabe") +
-      radio("modus", "uebung", s.modus, "Übung – Lösung nach jedem Speichern") + "</fieldset>" +
+      radio("modus", "uebung", s.modus, "Übung – Lösung nach jedem Speichern") +
+      radio("modus", "pruefung", s.modus, "Prüfung – Auswertung erst nach Abgabe") + "</fieldset>" +
       '<fieldset><legend>Bewertung</legend>' +
       radio("bewertung", "streng", s.bewertung, "1 Punkt nur bei vollständig richtiger Auswahl") +
       radio("bewertung", "teil", s.bewertung, "Teilpunkte (falsche Kreuze werden abgezogen)") + "</fieldset>" +
@@ -7206,32 +7241,31 @@ LZK_FRAGEN.push(
       '<fieldset><legend>Bestehensgrenze</legend><label for="grenze">Mindestens <input id="grenze" name="grenze" type="number" min="0" max="100" step="5" value="' +
       esc(s.grenze) + '"> % der Punkte</label><span class="muted">Frei einstellbar, kein offizieller Wert.</span></fieldset>' +
       "</form>" +
-      '<div><button class="btn primary" data-act="start">' + (testRunning() ? "Neuen Test starten (verwirft den offenen)" : "Test starten") + "</button></div>" +
-      '<h2>Zusammensetzung eines Tests</h2><div class="table-wrap"><table><thead><tr><th>Themengebiet</th><th class="num">Fragen im Test</th><th class="num">Fragen im Pool</th></tr></thead><tbody>';
-    THEMEN.forEach(function (t) {
-      h += "<tr><td>" + esc(t.name) + '</td><td class="num">' + t.anzahl + '</td><td class="num">' + (poolCount[t.id] || 0) + "</td></tr>";
-    });
-    h += '<tr><th>Summe</th><th class="num">' + TEST_SIZE + '</th><th class="num">' + FRAGEN.length + "</th></tr></tbody></table></div></section>";
-
-    /* Themen gezielt üben */
-    h += '<section class="panel"><h2>Themen gezielt üben</h2>' +
-      '<p class="lead">Wähle ein oder mehrere Themengebiete. Geübt werden alle Fragen dieser Themen in zufälliger Reihenfolge. ' +
-      "Es gelten die oben gewählten Einstellungen; für das Lernen eignet sich der Modus „Übung“.</p>" +
-      '<form id="ueben" class="themen-wahl">';
-    THEMEN.forEach(function (t) {
-      var id = "ueben-" + t.id;
-      h += '<label for="' + id + '"><input type="checkbox" id="' + id + '" name="ueben" value="' + t.id + '"' +
-        (state.uebenThemen.indexOf(t.id) >= 0 ? " checked" : "") + "> <span>" + esc(t.name) +
-        ' <span class="muted tabular">(' + (poolCount[t.id] || 0) + ")</span></span></label>";
-    });
-    h += "</form>" + '<div class="actionbar">' + uebenButton(poolCount) +
-      '<button class="btn" data-act="ueben-alle">Alle auswählen</button><button class="btn" data-act="ueben-keine">Auswahl aufheben</button></div></section>';
-    return h;
+      '<div class="start-leiste">' + startButton(poolCount) + "</div>" +
+      '<div class="notice" role="note"><strong>Hinweis zu den Inhalten:</strong> ' + esc(HINWEIS) + "</div>";
+    if (!themen) {
+      h += '<h2>Zusammensetzung eines Tests</h2><div class="table-wrap"><table><thead><tr><th>Themengebiet</th><th class="num">Fragen im Test</th><th class="num">Fragen im Pool</th></tr></thead><tbody>';
+      THEMEN.forEach(function (t) {
+        h += "<tr><td>" + esc(t.name) + '</td><td class="num">' + t.anzahl + '</td><td class="num">' + (poolCount[t.id] || 0) + "</td></tr>";
+      });
+      h += '<tr><th>Summe</th><th class="num">' + TEST_SIZE + '</th><th class="num">' + FRAGEN.length + "</th></tr></tbody></table></div>";
+    }
+    return h + "</section>";
   }
-  function uebenButton(poolCount) {
+  /* Startknopf passend zur Auswahl „Lernzielkontrolle“ oder „Einzelne Themen üben“ */
+  function startButton(poolCount) {
+    var offen = testRunning() ? " (verwirft den offenen Test)" : "";
+    if (state.settings.umfang !== "themen") {
+      return '<button class="btn primary" id="start-btn" data-act="start">Test starten' + offen + "</button>";
+    }
     var n = state.uebenThemen.reduce(function (s, id) { return s + (poolCount[id] || 0); }, 0);
-    return '<button class="btn primary" id="ueben-start" data-act="ueben"' + (n ? "" : " disabled") + ">" +
-      (n ? "Ausgewählte Themen üben (" + n + " Fragen)" : "Themen auswählen, um zu üben") + "</button>";
+    return '<button class="btn primary" id="start-btn" data-act="ueben"' + (n ? "" : " disabled") + ">" +
+      (n ? "Ausgewählte Themen üben (" + n + " Fragen)" + offen : "Mindestens ein Thema auswählen") + "</button>";
+  }
+  function choice(value, current, title, text) {
+    var id = "umfang-" + value;
+    return '<label class="choice" for="' + id + '"><input type="radio" id="' + id + '" name="umfang" value="' + value + '"' +
+      (current === value ? " checked" : "") + '><span><strong>' + esc(title) + '</strong><span class="muted">' + esc(text) + "</span></span></label>";
   }
   function poolCounts() {
     var c = {};
@@ -7327,7 +7361,7 @@ LZK_FRAGEN.push(
     h += '<section class="panel"><h2>Auswertung der Aufgaben</h2><div class="review">';
     state.test.forEach(function (q, i) {
       var f = byId[q.id], d = r.details[i];
-      h += '<div class="pool-q"><div class="score"><strong>' + (i + 1) + ". Frage</strong><span class=\"pill " + (d.exakt ? "ok" : "bad") + '">' +
+      h += '<div class="pool-q" id="auswertung-' + i + '"><div class="score"><strong>' + (i + 1) + ". Frage</strong><span class=\"pill " + (d.exakt ? "ok" : "bad") + '">' +
         fmtPts(d.punkte) + " / 1</span>" + (d.beantwortet ? "" : '<span class="muted">nicht beantwortet</span>') + "</div>" +
         '<div class="text">' + esc(f.frage) + '</div><ul class="answers">';
       q.order.forEach(function (orig) {
@@ -7425,10 +7459,11 @@ LZK_FRAGEN.push(
     if (el.name === "ueben") {
       state.uebenThemen = Array.prototype.map.call(document.querySelectorAll('#ueben input[name="ueben"]:checked'), function (x) { return x.value; });
       save();
-      var b = document.getElementById("ueben-start");
-      if (b) b.outerHTML = uebenButton(poolCounts());
+      var b = document.getElementById("start-btn");
+      if (b) b.outerHTML = startButton(poolCounts());
       return;
     }
+    if (el.name === "umfang") { state.settings.umfang = el.value; save(); render(); return; }
     if (el.closest("#settings")) {
       var s = state.settings;
       if (el.name === "modus") s.modus = el.value;
